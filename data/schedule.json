@@ -18,7 +18,7 @@
       }
     ],
     "updatedAt": "2026-09-19",
-    "rev": 3
+    "rev": 4
   },
   "periodTimes": [
     {
@@ -2972,25 +2972,6 @@
       "color": "#FF9D4D",
       "adjusted": true,
       "note": "第4周周一调至周三"
-    },
-    {
-      "name": "远程更新测试",
-      "raw": "远程更新测试/人工插入/用于验证 App 能否自动同步线上课表",
-      "weekday": 7,
-      "periods": [
-        1
-      ],
-      "weeks": [
-        3
-      ],
-      "weekText": "3周",
-      "campus": "远程",
-      "room": "看到即成功",
-      "teacher": "—",
-      "className": "2026级康复治疗技术6班",
-      "hours": "0",
-      "credits": "0",
-      "color": "#FF7A45"
     }
   ]
 }
