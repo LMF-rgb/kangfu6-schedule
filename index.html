@@ -874,7 +874,7 @@ window.SCHEDULE_DATA = {
       }
     ],
     "updatedAt": "2026-09-19",
-    "rev": 1
+    "rev": 2
   },
   "periodTimes": [
     {
@@ -5124,7 +5124,9 @@ window.SCHEDULE_DATA = {
         applySchedule(d);
         return d;
       } catch (e) {
-        /* 这个源不通，试下一个 */
+        // 网络不通 / 超时 / 换上的数据有问题。不打扰用户，但留条记录方便排查 ——
+        // 这里的 catch 也会接住 applySchedule 抛出的渲染错误，静默会很难查。
+        console.warn("[课表] 远程源不可用:", REMOTE_SOURCES[i], e && e.message);
       }
     }
     return null;
