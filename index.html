@@ -873,7 +873,8 @@ window.SCHEDULE_DATA = {
         "week": 4
       }
     ],
-    "updatedAt": "2026-09-19"
+    "updatedAt": "2026-09-19",
+    "rev": 1
   },
   "periodTimes": [
     {
@@ -3837,7 +3838,19 @@ window.SCHEDULE_DATA = {
 (function () {
   "use strict";
 
-  const DATA = window.SCHEDULE_DATA;
+  // 课表数据。内联一份保证离线可用；联网后会拉线上最新版覆盖（见 fetchRemoteSchedule）。
+  // DATA 是模块级变量，所有取数函数都在运行时读它，所以重新赋值即可全站生效，无需逐处替换。
+  let DATA = window.SCHEDULE_DATA;
+
+  // 线上课表 JSON。改课表只要更新它，同学下次打开就自动同步，不必重装。
+  // 双源：GitHub Pages 优先，jsDelivr 兜底（国内更通）。都带 CORS。
+  const REMOTE_SOURCES = [
+    "https://lmf-rgb.github.io/kangfu6-schedule/data/schedule.json",
+    "https://cdn.jsdelivr.net/gh/LMF-rgb/kangfu6-schedule@main/data/schedule.json",
+  ];
+  const REMOTE_CACHE = "cs_schedule_cache_v1";
+  const REMOTE_TIMEOUT = 8000;
+
   const STORE = {
     weekOffset: "cs_week_offset",
     startDate: "cs_start_date",
@@ -5025,9 +5038,106 @@ window.SCHEDULE_DATA = {
     );
   }
 
+  // ---------- 远程课表数据 ----------
+  // 线上放一份纯 JSON，改课表只需更新它；页面每次打开拉一次，有新版就静默换上。
+  // 拉不到（没网 / 被墙 / 文件坏了）就继续用手上的数据，功能不受影响。
+
+  // 结构不全的数据宁可不用 —— 坏数据一旦采纳，课表页会整个渲染不出来
+  function isUsableSchedule(d) {
+    return (
+      !!d && typeof d === "object" && !Array.isArray(d) &&
+      !!d.meta && typeof d.meta.startDate === "string" &&
+      typeof d.meta.totalWeeks === "number" &&
+      Array.isArray(d.periodTimes) && d.periodTimes.length > 0 &&
+      Array.isArray(d.days) && d.days.length > 0 &&
+      Array.isArray(d.courseList) &&
+      Array.isArray(d.sessions) && d.sessions.length > 0
+    );
+  }
+
+  // 版本号，缺失按 0 算
+  function scheduleRev(d) {
+    const r = d && d.meta ? d.meta.rev : null;
+    return typeof r === "number" && isFinite(r) ? r : 0;
+  }
+
+  function readCachedSchedule() {
+    try {
+      const d = JSON.parse(localStorage.getItem(REMOTE_CACHE) || "null");
+      return isUsableSchedule(d) ? d : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeCachedSchedule(d) {
+    try {
+      localStorage.setItem(REMOTE_CACHE, JSON.stringify(d));
+    } catch (e) {
+      /* 配额满了就不缓存，不影响本次使用 */
+    }
+  }
+
+  // 采纳新数据并重画；state.week 要重算，因为学期起点有可能变
+  function applySchedule(d) {
+    DATA = d;
+    state.week = getCurrentWeek();
+    localStorage.setItem(STORE.selectedWeek, String(state.week));
+    renderWeekPicker();
+    renderSchedule();
+  }
+
+  function fetchJson(url) {
+    // 带时间戳绕开浏览器缓存，否则可能一直拿到旧文件
+    const u = url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now();
+    return new Promise((resolve, reject) => {
+      const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = setTimeout(() => {
+        if (ctl) ctl.abort();
+        reject(new Error("timeout"));
+      }, REMOTE_TIMEOUT);
+      const opt = ctl ? { signal: ctl.signal, cache: "no-store" } : { cache: "no-store" };
+      fetch(u, opt)
+        .then((r) => {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then((j) => {
+          clearTimeout(timer);
+          resolve(j);
+        })
+        .catch((e) => {
+          clearTimeout(timer);
+          reject(e);
+        });
+    });
+  }
+
+  // 依次试各数据源，任一成功且比手上新就采纳；返回被采纳的数据，否则 null
+  async function fetchRemoteSchedule() {
+    for (let i = 0; i < REMOTE_SOURCES.length; i++) {
+      try {
+        const d = await fetchJson(REMOTE_SOURCES[i]);
+        if (!isUsableSchedule(d)) continue;
+        if (scheduleRev(d) <= scheduleRev(DATA)) return null;
+        writeCachedSchedule(d);
+        applySchedule(d);
+        return d;
+      } catch (e) {
+        /* 这个源不通，试下一个 */
+      }
+    }
+    return null;
+  }
+
   // ---------- init ----------
   function init() {
     purgeLegacySeedMessages();
+
+    // 上次联网缓存下来的课表，比内联的新就先用着 —— 免得离线打开时看到的是旧课表
+    const cached = readCachedSchedule();
+    if (cached && scheduleRev(cached) > scheduleRev(DATA)) DATA = cached;
+
     // count this launch
     const openN = bumpOpenCount();
 
@@ -5051,6 +5161,13 @@ window.SCHEDULE_DATA = {
     setInterval(() => {
       if (state.page === "schedule") renderTodayBanner();
     }, 60000);
+
+    // 联网拉一次线上课表：有新版就静默换上；失败静默忽略，用内联的照常跑
+    setTimeout(() => {
+      fetchRemoteSchedule().then((d) => {
+        if (d) toast("课表已更新");
+      });
+    }, 300);
 
     console.log("[课表] 打开次数:", openN, "当前第", sysWeek, "周星期", sysDay);
   }
